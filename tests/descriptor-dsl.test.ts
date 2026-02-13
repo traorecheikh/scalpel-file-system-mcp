@@ -88,3 +88,13 @@ test("Smart DSL: parses param shorthand with single quotes", () => {
     assert.strictEqual(result.fields?.value, "hello, world");
 });
 
+test("Smart DSL: parses param shorthand with escaped quotes", () => {
+    const result = compileDescriptorForInsert('param(msg,string,"Hello, \\"nested\\" world")', "FunctionDeclaration");
+
+    assert.strictEqual(result.kind, "parameter");
+    assert.strictEqual(result.fields?.name, "msg");
+    assert.strictEqual(result.fields?.datatype, "string");
+    // Note: parseLiteralValue removes the outer quotes but keeps inner escaped quotes as is
+    assert.strictEqual(result.fields?.value, 'Hello, \\"nested\\" world');
+});
+

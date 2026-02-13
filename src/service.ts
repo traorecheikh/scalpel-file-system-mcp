@@ -195,7 +195,7 @@ export class ScalpelService {
     }
 
     // Use cached tree if available, otherwise re-parse
-    let tree;
+    let tree: any;
     if (snapshot.cachedTree) {
       tree = snapshot.cachedTree;
     } else {

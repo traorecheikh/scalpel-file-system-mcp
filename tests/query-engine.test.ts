@@ -132,3 +132,31 @@ test("QueryEngine handles raw S-expression query", () => {
     assert.strictEqual(results[0].type, 'function_declaration');
 });
 
+test("QueryEngine escapes quotes and backslashes in selector values", () => {
+    // This test verifies that the escapeValue logic works
+    // Even though we may not have source code with such values,
+    // we want to ensure the query compilation doesn't break
+    const source = `const x = "test";`;
+    const { tree } = parseSourceText("javascript", source);
+    const nodeIdMap = new Map<string, string>();
+    
+    const visit = (node: any) => {
+        nodeIdMap.set(`${node.startIndex}:${node.endIndex}:${node.type}`, `id_${node.startIndex}`);
+        for (const child of node.namedChildren) {
+            visit(child);
+        }
+    };
+    visit(tree.rootNode);
+    
+    // Test that a selector with quotes in the value doesn't cause a syntax error
+    // The escaping should allow this to compile without throwing
+    const results = QueryEngine.getInstance().runQuery(
+        "javascript",
+        tree.rootNode,
+        'string[value="test\\"quote"]',
+        nodeIdMap
+    );
+    // The query should execute without error (even if it matches nothing)
+    assert.ok(Array.isArray(results));
+});
+
