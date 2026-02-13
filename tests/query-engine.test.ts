@@ -96,8 +96,7 @@ test("QueryEngine handles selector with special characters needing escaping", ()
     };
     visit(tree.rootNode);
     
-    // This should not throw due to proper escaping - the main goal is to verify
-    // that the query is well-formed and doesn't cause a crash
+    // Verify that the query is well-formed and doesn't cause a crash due to proper escaping
     const results = QueryEngine.getInstance().runQuery(
         "javascript", 
         tree.rootNode, 
