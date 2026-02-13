@@ -149,16 +149,16 @@ export class TreeStore {
       );
     }
 
-    const parseResult = parseSourceText(language, session.absoluteFilePath, sourceText);
-    const rawTree = buildRawTree(language, sourceText, sourceHash, parseResult.rootNode);
+    const tree = parseSourceText(language, session.absoluteFilePath, sourceText);
+    const rawTree = buildRawTree(language, sourceText, sourceHash, tree.rootNode);
 
     const nextTreeVersion = previous ? previous.treeVersion + 1 : session.workingVersion;
     session.workingVersion = nextTreeVersion;
     session.updatedAt = new Date().toISOString();
 
     const snapshot = previous
-      ? reconcileTree(session.transactionId, nextTreeVersion, previous, rawTree, parseResult.tree)
-      : materializeInitialTree(session.transactionId, nextTreeVersion, rawTree, parseResult.tree);
+      ? reconcileTree(session.transactionId, nextTreeVersion, previous, rawTree, tree)
+      : materializeInitialTree(session.transactionId, nextTreeVersion, rawTree, tree);
 
     this.snapshots.set(session.transactionId, snapshot);
     return snapshot;
@@ -679,8 +679,8 @@ export class TreeStore {
     const projectedHash = hash(projectedText);
 
     // Ensure projected output remains parseable before writing to disk.
-    const parseResult = parseSourceText(snapshot.language, absoluteFilePath, projectedText);
-    const rawTree = buildRawTree(snapshot.language, projectedText, projectedHash, parseResult.rootNode);
+    const tree = parseSourceText(snapshot.language, absoluteFilePath, projectedText);
+    const rawTree = buildRawTree(snapshot.language, projectedText, projectedHash, tree.rootNode);
 
     if (projectedText !== fileTextBefore) {
       await atomicWriteFile(absoluteFilePath, projectedText);
@@ -723,12 +723,9 @@ function parseSourceText(
   language: ParserLanguage,
   filePath: string,
   sourceText: string,
-): { rootNode: TreeSitterNode; tree: any } {
+): any {
   const parseResult = treeSitterParse(language, sourceText);
-  return { 
-    rootNode: parseResult.tree.rootNode,
-    tree: parseResult.tree
-  };
+  return parseResult.tree;
 }
 
 function buildRawTree(
