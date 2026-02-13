@@ -8,6 +8,7 @@ import {
 } from "./descriptor-compiler.js";
 import type { SupportedLanguage } from "./schemas.js";
 import type { TransactionSession } from "./transaction-store.js";
+import type { Tree } from "tree-sitter";
 import {
   parseSourceText as treeSitterParse,
   extractIdentityAnchor as treeSitterExtractAnchor,
@@ -95,6 +96,7 @@ export interface TreeSnapshot {
   mutationCount: number;
   tombstones: Set<string>;
   changedNodeIds: Set<string>;
+  cachedTree?: Tree; // Tree-sitter Tree object to avoid re-parsing
 }
 
 export interface MutationOperationResult {
@@ -148,16 +150,16 @@ export class TreeStore {
       );
     }
 
-    const sourceFile = parseSourceText(language, session.absoluteFilePath, sourceText);
-    const rawTree = buildRawTree(language, sourceText, sourceHash, sourceFile);
+    const tree = parseSourceText(language, session.absoluteFilePath, sourceText);
+    const rawTree = buildRawTree(language, sourceText, sourceHash, tree.rootNode);
 
     const nextTreeVersion = previous ? previous.treeVersion + 1 : session.workingVersion;
     session.workingVersion = nextTreeVersion;
     session.updatedAt = new Date().toISOString();
 
     const snapshot = previous
-      ? reconcileTree(session.transactionId, nextTreeVersion, previous, rawTree)
-      : materializeInitialTree(session.transactionId, nextTreeVersion, rawTree);
+      ? reconcileTree(session.transactionId, nextTreeVersion, previous, rawTree, tree)
+      : materializeInitialTree(session.transactionId, nextTreeVersion, rawTree, tree);
 
     this.snapshots.set(session.transactionId, snapshot);
     return snapshot;
@@ -678,8 +680,8 @@ export class TreeStore {
     const projectedHash = hash(projectedText);
 
     // Ensure projected output remains parseable before writing to disk.
-    const sourceFile = parseSourceText(snapshot.language, absoluteFilePath, projectedText);
-    const rawTree = buildRawTree(snapshot.language, projectedText, projectedHash, sourceFile);
+    const tree = parseSourceText(snapshot.language, absoluteFilePath, projectedText);
+    const rawTree = buildRawTree(snapshot.language, projectedText, projectedHash, tree.rootNode);
 
     if (projectedText !== fileTextBefore) {
       await atomicWriteFile(absoluteFilePath, projectedText);
@@ -722,9 +724,9 @@ function parseSourceText(
   language: ParserLanguage,
   filePath: string,
   sourceText: string,
-): TreeSitterNode {
+): Tree {
   const parseResult = treeSitterParse(language, sourceText);
-  return parseResult.tree.rootNode;
+  return parseResult.tree;
 }
 
 function buildRawTree(
@@ -805,6 +807,7 @@ function materializeInitialTree(
   transactionId: string,
   treeVersion: number,
   rawTree: RawTree,
+  cachedTree?: Tree,
 ): TreeSnapshot {
   const usedNodeIds = new Set<string>();
   const instanceToNodeId = new Map<string, string>();
@@ -836,6 +839,7 @@ function materializeInitialTree(
       fallbackMatches: 0,
       stabilityScore: 1,
     },
+    cachedTree,
   );
 }
 
@@ -844,6 +848,7 @@ function reconcileTree(
   treeVersion: number,
   previous: TreeSnapshot,
   rawTree: RawTree,
+  cachedTree?: Tree,
 ): TreeSnapshot {
   const usedOldNodeIds = new Set<string>();
   const instanceToNodeId = new Map<string, string>();
@@ -946,6 +951,7 @@ function reconcileTree(
       fallbackMatches: counters.fallbackMatches,
       stabilityScore,
     },
+    cachedTree,
   );
 }
 
@@ -955,6 +961,7 @@ function materializeSnapshotFromRaw(
   rawTree: RawTree,
   instanceToNodeId: Map<string, string>,
   identityMetrics: IdentityMetrics,
+  cachedTree?: Tree,
 ): TreeSnapshot {
   const nodesById = new Map<string, ParsedNodeRecord>();
 
@@ -1035,6 +1042,7 @@ function materializeSnapshotFromRaw(
     mutationCount: 0,
     tombstones: new Set<string>(),
     changedNodeIds: new Set<string>(),
+    cachedTree,
   };
 }
 

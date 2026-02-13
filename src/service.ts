@@ -27,6 +27,7 @@ import type {
   ParsedNodeRecord,
   TreeSnapshot,
 } from "./tree-store.js";
+import { TreeStore } from "./tree-store.js";
 import { QueryEngine } from "./query-engine.js";
 import { IntentCompiler } from "./intent-compiler.js";
 import { parseSourceText } from "./tree-sitter-parser.js";
@@ -193,12 +194,18 @@ export class ScalpelService {
       nodeIdMap.set(`${record.startOffset}:${record.endOffset}:${record.type}`, id);
     }
 
-    // Re-parse to get tree-sitter tree
-    const parseResult = parseSourceText(snapshot.language, snapshot.sourceText);
+    // Use cached tree if available, otherwise re-parse
+    let tree;
+    if (snapshot.cachedTree) {
+      tree = snapshot.cachedTree;
+    } else {
+      const parseResult = parseSourceText(snapshot.language, snapshot.sourceText);
+      tree = parseResult.tree;
+    }
 
     const results = QueryEngine.getInstance().runQuery(
       snapshot.language,
-      parseResult.tree.rootNode,
+      tree.rootNode,
       args.selector,
       nodeIdMap,
     );
