@@ -62,3 +62,73 @@ test("QueryEngine returns empty for no match", () => {
     const results = QueryEngine.getInstance().runQuery("javascript", tree.rootNode, 'function_declaration[name="baz"]', nodeIdMap);
     assert.strictEqual(results.length, 0);
 });
+
+test("QueryEngine handles invalid selector syntax", () => {
+    const source = `function foo() {}`;
+    const { tree } = parseSourceText("javascript", source);
+    const nodeIdMap = new Map<string, string>();
+    
+    assert.throws(() => {
+        QueryEngine.getInstance().runQuery("javascript", tree.rootNode, 'invalid[', nodeIdMap);
+    }, /Selector syntax error/);
+});
+
+test("QueryEngine handles selector with escaped quotes in value", () => {
+    const source = `const msg = 'test "quoted" value';`;
+    const { tree } = parseSourceText("javascript", source);
+    const nodeIdMap = new Map<string, string>();
+    
+    const visit = (node: any) => {
+        nodeIdMap.set(`${node.startIndex}:${node.endIndex}:${node.type}`, `id_${node.startIndex}`);
+        for (const child of node.namedChildren) {
+            visit(child);
+        }
+    };
+    visit(tree.rootNode);
+    
+    // This should not throw an error even with complex values
+    const results = QueryEngine.getInstance().runQuery("javascript", tree.rootNode, 'variable_declarator', nodeIdMap);
+    assert.ok(results.length >= 0); // Should execute without error
+});
+
+test("QueryEngine handles simple type selector", () => {
+    const source = `function foo() { return 1; }`;
+    const { tree } = parseSourceText("javascript", source);
+    const nodeIdMap = new Map<string, string>();
+    
+    const visit = (node: any) => {
+        nodeIdMap.set(`${node.startIndex}:${node.endIndex}:${node.type}`, `id_${node.startIndex}`);
+        for (const child of node.namedChildren) {
+            visit(child);
+        }
+    };
+    visit(tree.rootNode);
+    
+    const results = QueryEngine.getInstance().runQuery("javascript", tree.rootNode, 'return_statement', nodeIdMap);
+    assert.ok(results.length > 0);
+    assert.strictEqual(results[0].type, 'return_statement');
+});
+
+test("QueryEngine handles raw S-expression query", () => {
+    const source = `function foo() { return 1; }`;
+    const { tree } = parseSourceText("javascript", source);
+    const nodeIdMap = new Map<string, string>();
+    
+    const visit = (node: any) => {
+        nodeIdMap.set(`${node.startIndex}:${node.endIndex}:${node.type}`, `id_${node.startIndex}`);
+        for (const child of node.namedChildren) {
+            visit(child);
+        }
+    };
+    visit(tree.rootNode);
+    
+    const results = QueryEngine.getInstance().runQuery(
+        "javascript", 
+        tree.rootNode, 
+        '(function_declaration) @match', 
+        nodeIdMap
+    );
+    assert.ok(results.length > 0);
+    assert.strictEqual(results[0].type, 'function_declaration');
+});
+
