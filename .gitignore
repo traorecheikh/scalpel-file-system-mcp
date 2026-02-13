@@ -2,16 +2,21 @@ node_modules/
 dist/
 *.log
 
-# Documentation and AI artifacts
-*.md
+# Documentation and AI artifacts (exclude internal docs, keep README)
+prd.md
+DOCKER.md
+SCALPEL_MCP_IMPLEMENTATION_PLAN.md
+DEPLOYMENT_SUMMARY.txt
 .claude/
 .ai/
 *.mcp.json
+mcp-creator/
 
 # Temporary files
 *.tmp
 *.swp
 *~
+commit-changes.sh
 
 # Test artifacts
 /tmp/
