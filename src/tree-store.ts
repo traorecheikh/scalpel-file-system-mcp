@@ -8,6 +8,7 @@ import {
 } from "./descriptor-compiler.js";
 import type { SupportedLanguage } from "./schemas.js";
 import type { TransactionSession } from "./transaction-store.js";
+import type { Tree } from "tree-sitter";
 import {
   parseSourceText as treeSitterParse,
   extractIdentityAnchor as treeSitterExtractAnchor,
@@ -95,7 +96,7 @@ export interface TreeSnapshot {
   mutationCount: number;
   tombstones: Set<string>;
   changedNodeIds: Set<string>;
-  cachedTree?: any; // Tree-sitter Tree object to avoid re-parsing
+  cachedTree?: Tree; // Tree-sitter Tree object to avoid re-parsing
 }
 
 export interface MutationOperationResult {
@@ -723,7 +724,7 @@ function parseSourceText(
   language: ParserLanguage,
   filePath: string,
   sourceText: string,
-): any {
+): Tree {
   const parseResult = treeSitterParse(language, sourceText);
   return parseResult.tree;
 }
@@ -806,7 +807,7 @@ function materializeInitialTree(
   transactionId: string,
   treeVersion: number,
   rawTree: RawTree,
-  cachedTree?: any,
+  cachedTree?: Tree,
 ): TreeSnapshot {
   const usedNodeIds = new Set<string>();
   const instanceToNodeId = new Map<string, string>();
@@ -847,7 +848,7 @@ function reconcileTree(
   treeVersion: number,
   previous: TreeSnapshot,
   rawTree: RawTree,
-  cachedTree?: any,
+  cachedTree?: Tree,
 ): TreeSnapshot {
   const usedOldNodeIds = new Set<string>();
   const instanceToNodeId = new Map<string, string>();
@@ -960,7 +961,7 @@ function materializeSnapshotFromRaw(
   rawTree: RawTree,
   instanceToNodeId: Map<string, string>,
   identityMetrics: IdentityMetrics,
-  cachedTree?: any,
+  cachedTree?: Tree,
 ): TreeSnapshot {
   const nodesById = new Map<string, ParsedNodeRecord>();
 

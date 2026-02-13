@@ -87,4 +87,5 @@ test("Smart DSL: handles parameters with special characters in names", () => {
     assert.strictEqual(result.fields?.name, "_privateVar");
     assert.strictEqual(result.fields?.datatype, "number");
     assert.strictEqual(result.fields?.value, 42);
+    assert.strictEqual(typeof result.fields?.value, "number", "Value should be converted to number type");
 });
