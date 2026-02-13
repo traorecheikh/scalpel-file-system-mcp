@@ -51,6 +51,53 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
+    name: "scalpel_search_structure",
+    description:
+      "Search for nodes using a simplified structural query language or raw tree-sitter queries.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", minLength: 1, maxLength: 4096 },
+        transaction_id: { type: "string", minLength: 1, maxLength: 128 },
+        selector: {
+          type: "string",
+          minLength: 1,
+          maxLength: 1024,
+          description: "Structural selector (e.g. 'function_declaration[name=\"foo\"]') or raw tree-sitter query.",
+        },
+      },
+      required: ["file", "transaction_id", "selector"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "scalpel_edit_intent",
+    description:
+      "Execute a batch of structural edits or high-level intent macros.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", minLength: 1, maxLength: 4096 },
+        transaction_id: { type: "string", minLength: 1, maxLength: 128 },
+        intents: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              intent: { type: "string", minLength: 1, maxLength: 64 },
+              args: { type: "object", additionalProperties: true },
+            },
+            required: ["intent", "args"],
+          },
+          maxItems: 100,
+        },
+        dry_run: { type: "boolean", default: false },
+      },
+      required: ["file", "transaction_id", "intents"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "scalpel_get_node",
     description:
       "Fetch metadata for one node by node ID, with optional bounded text excerpt.",

@@ -21,13 +21,16 @@ const DescriptorTypeSchema = z.enum([
   "raw_node",
 ]);
 
-const NodeDescriptorSchema = z
-  .object({
-    type: DescriptorTypeSchema,
-    value: z.unknown().optional(),
-    fields: z.record(z.unknown()).optional(),
-  })
-  .strict();
+const NodeDescriptorSchema = z.union([
+  z
+    .object({
+      type: DescriptorTypeSchema,
+      value: z.unknown().optional(),
+      fields: z.record(z.unknown()).optional(),
+    })
+    .strict(),
+  z.string().min(1).max(1024),
+]);
 
 export const ScalpelBeginTransactionArgsSchema = z
   .object({
@@ -52,6 +55,28 @@ export const ScalpelGetNodeArgsSchema = z
     node_id: NodeIdSchema,
     include_text: z.boolean().default(false),
     max_excerpt_bytes: z.number().int().min(32).max(16_384).default(512),
+  })
+  .strict();
+
+export const ScalpelSearchStructureArgsSchema = z
+  .object({
+    file: FilePathSchema,
+    transaction_id: TransactionIdSchema,
+    selector: z.string().min(1).max(1024),
+  })
+  .strict();
+
+const EditIntentSchema = z.object({
+  intent: z.string().min(1).max(64),
+  args: z.record(z.unknown()),
+});
+
+export const ScalpelEditIntentArgsSchema = z
+  .object({
+    file: FilePathSchema,
+    transaction_id: TransactionIdSchema,
+    intents: z.array(EditIntentSchema).max(100),
+    dry_run: z.boolean().default(false),
   })
   .strict();
 
@@ -119,6 +144,8 @@ export const TOOL_SCHEMAS: Record<ToolName, z.ZodTypeAny> = {
   scalpel_begin_transaction: ScalpelBeginTransactionArgsSchema,
   scalpel_list_nodes: ScalpelListNodesArgsSchema,
   scalpel_get_node: ScalpelGetNodeArgsSchema,
+  scalpel_search_structure: ScalpelSearchStructureArgsSchema,
+  scalpel_edit_intent: ScalpelEditIntentArgsSchema,
   scalpel_insert_child: ScalpelInsertChildArgsSchema,
   scalpel_replace_node: ScalpelReplaceNodeArgsSchema,
   scalpel_remove_node: ScalpelRemoveNodeArgsSchema,
@@ -135,6 +162,10 @@ export type ScalpelBeginTransactionArgs = z.infer<
 >;
 export type ScalpelListNodesArgs = z.infer<typeof ScalpelListNodesArgsSchema>;
 export type ScalpelGetNodeArgs = z.infer<typeof ScalpelGetNodeArgsSchema>;
+export type ScalpelSearchStructureArgs = z.infer<
+  typeof ScalpelSearchStructureArgsSchema
+>;
+export type ScalpelEditIntentArgs = z.infer<typeof ScalpelEditIntentArgsSchema>;
 export type ScalpelInsertChildArgs = z.infer<
   typeof ScalpelInsertChildArgsSchema
 >;

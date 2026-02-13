@@ -116,11 +116,13 @@ const TARGET_KIND_BY_NODE_TYPE: Record<string, DescriptorKind> = {
   import_specifier: "import_specifier",
 };
 
-export interface NodeDescriptorInput {
-  type: string;
-  value?: unknown;
-  fields?: Record<string, unknown>;
-}
+export type NodeDescriptorInput =
+  | {
+      type: string;
+      value?: unknown;
+      fields?: Record<string, unknown>;
+    }
+  | string;
 
 export interface CompiledDescriptor {
   kind: DescriptorKind;
@@ -195,6 +197,10 @@ export function compileDescriptorForReplace(
 }
 
 function normalizeDescriptor(input: NodeDescriptorInput): NormalizedDescriptor {
+  if (typeof input === "string") {
+    return parseShorthand(input);
+  }
+
   const rawType = typeof input.type === "string" ? input.type.trim() : "";
   if (!rawType) {
     throw new ToolError("VALIDATION_ERROR", "node descriptor type is required");
@@ -216,6 +222,70 @@ function normalizeDescriptor(input: NodeDescriptorInput): NormalizedDescriptor {
     value: input.value,
     fields: input.fields ?? {},
   };
+}
+
+function parseShorthand(input: string): NormalizedDescriptor {
+  // +param(name,type,val) or param(name,type,val)
+  const match = input.match(/^([+]?)([a-zA-Z_]+)\((.*)\)$/);
+  if (!match) {
+    throw new ToolError(
+      "VALIDATION_ERROR",
+      `Invalid shorthand descriptor syntax: ${input}`,
+    );
+  }
+
+  const kindAlias = match[2];
+  const argsStr = match[3];
+
+  // Naive CSV split (doesn't handle commas in strings properly, assume simple args)
+  const args = argsStr.split(",").map((s) => s.trim());
+
+  if (kindAlias === "param" || kindAlias === "parameter") {
+    const name = args[0];
+    const type = args[1];
+    const val = args[2];
+
+    const fields: Record<string, any> = { name };
+    if (type) fields.datatype = type;
+    if (val) fields.value = parseLiteralValue(val);
+
+    return { kind: "parameter", value: undefined, fields };
+  }
+
+  if (kindAlias === "import") {
+    const name = args[0];
+    const alias = args[1];
+    const fields: Record<string, any> = { name };
+    if (alias) fields.alias = alias;
+    return { kind: "import_specifier", value: undefined, fields };
+  }
+
+  if (kindAlias === "field") {
+    const name = args[0];
+    const type = args[1];
+    const val = args[2];
+    const fields: Record<string, any> = { name };
+    if (type) fields.datatype = type;
+    if (val) fields.value = parseLiteralValue(val);
+    return { kind: "field", value: undefined, fields };
+  }
+
+  throw new ToolError("VALIDATION_ERROR", `Unknown shorthand kind: ${kindAlias}`);
+}
+
+function parseLiteralValue(val: string): any {
+  if (val === "true") return true;
+  if (val === "false") return false;
+  if (val === "null") return null;
+  if (!isNaN(Number(val)) && val.trim() !== "") return Number(val);
+  // quoted string
+  if (
+    (val.startsWith('"') && val.endsWith('"')) ||
+    (val.startsWith("'") && val.endsWith("'"))
+  ) {
+    return val.slice(1, -1);
+  }
+  return val;
 }
 
 function compileDescriptor(descriptor: NormalizedDescriptor): CompiledDescriptor {
@@ -301,6 +371,9 @@ function compileParameter(descriptor: NormalizedDescriptor): CompiledDescriptor 
   const fields: Record<string, unknown> = { name, optional };
   if (datatype) {
     fields.datatype = datatype;
+  }
+  if (descriptor.fields.value !== undefined) {
+    fields.value = descriptor.fields.value;
   }
 
   const compiled: CompiledDescriptor = {

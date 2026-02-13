@@ -1344,7 +1344,11 @@ function renderDescriptorSnippet(descriptor: {
         typeof descriptor.fields?.datatype === "string"
           ? `: ${descriptor.fields.datatype}`
           : "";
-      return `${name}${optional}${datatype}`;
+      const initializer =
+        descriptor.fields?.value !== undefined
+          ? ` = ${renderLiteral(descriptor.fields.value)}`
+          : "";
+      return `${name}${optional}${datatype}${initializer}`;
     }
     case "field": {
       const name =

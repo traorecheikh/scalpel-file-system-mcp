@@ -11,6 +11,7 @@ import {
 import type {
   ScalpelBeginTransactionArgs,
   ScalpelCommitArgs,
+  ScalpelEditIntentArgs,
   ScalpelGetNodeArgs,
   ScalpelInsertChildArgs,
   ScalpelListNodesArgs,
@@ -18,6 +19,7 @@ import type {
   ScalpelRemoveNodeArgs,
   ScalpelReplaceNodeArgs,
   ScalpelRollbackArgs,
+  ScalpelSearchStructureArgs,
   ScalpelValidateTransactionArgs,
 } from "./schemas.js";
 import { loadConfig } from "./config.js";
@@ -143,6 +145,10 @@ async function executeTool(name: ToolName, args: unknown): Promise<unknown> {
       return service.listNodes(args as ScalpelListNodesArgs);
     case "scalpel_get_node":
       return service.getNode(args as ScalpelGetNodeArgs);
+    case "scalpel_search_structure":
+      return service.searchStructure(args as ScalpelSearchStructureArgs);
+    case "scalpel_edit_intent":
+      return service.editIntent(args as ScalpelEditIntentArgs);
     case "scalpel_insert_child":
       return service.insertChild(args as ScalpelInsertChildArgs);
     case "scalpel_replace_node":
