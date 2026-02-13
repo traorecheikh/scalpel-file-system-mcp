@@ -28,6 +28,9 @@ import type {
   TreeSnapshot,
 } from "./tree-store.js";
 import { TreeStore } from "./tree-store.js";
+import { QueryEngine } from "./query-engine.js";
+import { IntentCompiler } from "./intent-compiler.js";
+import { parseSourceText } from "./tree-sitter-parser.js";
 
 const EXTENSION_LANGUAGE_MAP: Record<string, SupportedLanguage> = {
   ".ts": "typescript",
@@ -163,6 +166,120 @@ export class ScalpelService {
       nodes,
       total_node_count: snapshot.nodeCount,
       identity_metrics: snapshot.identityMetrics,
+    };
+  }
+
+  public async searchStructure(args: {
+    transaction_id: string;
+    file: string;
+    selector: string;
+  }): Promise<{
+    transactionId: string;
+    file: string;
+    treeVersion: number;
+    matches: Array<{
+      node_id: string;
+      type: string;
+      text_snippet: string;
+      start_index: number;
+      end_index: number;
+    }>;
+  }> {
+    const session = this.requireSessionForFile(args.transaction_id, args.file);
+    const snapshot = await this.ensureSnapshot(session);
+    this.transactions.touch(session.transactionId);
+
+    const nodeIdMap = new Map<string, string>();
+    for (const [id, record] of snapshot.nodesById) {
+      nodeIdMap.set(`${record.startOffset}:${record.endOffset}:${record.type}`, id);
+    }
+
+    // Use cached tree if available, otherwise re-parse
+    let tree;
+    if (snapshot.cachedTree) {
+      tree = snapshot.cachedTree;
+    } else {
+      const parseResult = parseSourceText(snapshot.language, snapshot.sourceText);
+      tree = parseResult.tree;
+    }
+
+    const results = QueryEngine.getInstance().runQuery(
+      snapshot.language,
+      tree.rootNode,
+      args.selector,
+      nodeIdMap,
+    );
+
+    return {
+      transactionId: session.transactionId,
+      file: session.file,
+      treeVersion: snapshot.treeVersion,
+      matches: results.map((r) => ({
+        node_id: r.nodeId,
+        type: r.type,
+        text_snippet: r.textSnippet,
+        start_index: r.startIndex,
+        end_index: r.endIndex,
+      })),
+    };
+  }
+
+  public async editIntent(args: {
+    transaction_id: string;
+    file: string;
+    intents: Array<{ intent: string; args: Record<string, unknown> }>;
+    dry_run: boolean;
+  }): Promise<{
+    transactionId: string;
+    file: string;
+    results: Array<unknown>;
+    treeVersion: number;
+  }> {
+    if (args.dry_run) {
+      throw new ToolError(
+        "NOT_IMPLEMENTED",
+        "Dry run is not supported in this version.",
+      );
+    }
+
+    const session = this.requireSessionForFile(args.transaction_id, args.file);
+    const results: Array<unknown> = [];
+
+    // Execute sequentially
+    for (const intent of args.intents) {
+      // Re-fetch snapshot as it updates after each op
+      const snapshot = await this.ensureSnapshot(session);
+      const compiler = new IntentCompiler(snapshot);
+      const ops = compiler.compile(intent.intent, intent.args, {
+        file: args.file,
+        transaction_id: args.transaction_id,
+      });
+
+      for (const op of ops) {
+        let result;
+        if (op.tool === "scalpel_insert_child") {
+          result = await this.insertChild(op.args);
+        } else if (op.tool === "scalpel_replace_node") {
+          result = await this.replaceNode(op.args);
+        } else if (op.tool === "scalpel_remove_node") {
+          result = await this.removeNode(op.args);
+        } else if (op.tool === "scalpel_move_subtree") {
+          result = await this.moveSubtree(op.args);
+        } else {
+          throw new ToolError("INTERNAL_ERROR", `Unknown tool op: ${op.tool}`);
+        }
+        results.push(result);
+      }
+    }
+
+    // Get final version
+    const finalSnapshot = this.trees.require(session.transactionId);
+
+    return {
+      transactionId: session.transactionId,
+      file: session.file,
+      results,
+      treeVersion: finalSnapshot.treeVersion,
     };
   }
 

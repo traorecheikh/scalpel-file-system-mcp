@@ -49,6 +49,22 @@ function getOrCreateParser(language: ParserLanguage): Parser {
   return parser;
 }
 
+export function getLanguage(language: ParserLanguage): Language {
+  switch (language) {
+    case "typescript":
+      return TypeScript.typescript as Language;
+    case "javascript":
+      return JavaScript as Language;
+    case "java":
+      return Java as Language;
+    default:
+      throw new ToolError(
+        "INVALID_OPERATION",
+        `Language ${language satisfies never} is not supported`,
+      );
+  }
+}
+
 export function parseSourceText(
   language: ParserLanguage,
   sourceText: string,
