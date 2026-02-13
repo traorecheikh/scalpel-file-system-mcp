@@ -94,7 +94,7 @@ test("Smart DSL: parses param shorthand with escaped quotes", () => {
     assert.strictEqual(result.kind, "parameter");
     assert.strictEqual(result.fields?.name, "msg");
     assert.strictEqual(result.fields?.datatype, "string");
-    // Note: parseLiteralValue removes the outer quotes but keeps inner escaped quotes as is
+    // parseLiteralValue removes outer quotes but preserves backslashes in the content
     assert.strictEqual(result.fields?.value, 'Hello, \\"nested\\" world');
 });
 

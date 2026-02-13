@@ -83,6 +83,8 @@ export class QueryEngine {
     
     // More robust regex that handles escaped quotes and greedy matching
     // Match: type[field="value"] or type[field='value']
+    // Note: This regex handles most common cases but may not work with values
+    // that have unusual quote patterns. For complex queries, use raw S-expressions.
     const parts = selector.match(/^([a-zA-Z_]+)(?:\[([a-zA-Z_]+)=(['"])(.+?)\3\])?$/);
     if (!parts) {
       // Fallback: wrap in generic match if it looks like a type
