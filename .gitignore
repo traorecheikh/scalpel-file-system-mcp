@@ -1,0 +1,18 @@
+node_modules/
+dist/
+*.log
+
+# Documentation and AI artifacts
+*.md
+.claude/
+.ai/
+*.mcp.json
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# Test artifacts
+/tmp/
+.test-*
