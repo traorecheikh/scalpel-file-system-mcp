@@ -95,6 +95,7 @@ export interface TreeSnapshot {
   mutationCount: number;
   tombstones: Set<string>;
   changedNodeIds: Set<string>;
+  cachedTree?: any; // Tree-sitter Tree object (cached to avoid re-parsing)
 }
 
 export interface MutationOperationResult {
@@ -148,16 +149,16 @@ export class TreeStore {
       );
     }
 
-    const sourceFile = parseSourceText(language, session.absoluteFilePath, sourceText);
-    const rawTree = buildRawTree(language, sourceText, sourceHash, sourceFile);
+    const parseResult = parseSourceText(language, session.absoluteFilePath, sourceText);
+    const rawTree = buildRawTree(language, sourceText, sourceHash, parseResult.rootNode);
 
     const nextTreeVersion = previous ? previous.treeVersion + 1 : session.workingVersion;
     session.workingVersion = nextTreeVersion;
     session.updatedAt = new Date().toISOString();
 
     const snapshot = previous
-      ? reconcileTree(session.transactionId, nextTreeVersion, previous, rawTree)
-      : materializeInitialTree(session.transactionId, nextTreeVersion, rawTree);
+      ? reconcileTree(session.transactionId, nextTreeVersion, previous, rawTree, parseResult.tree)
+      : materializeInitialTree(session.transactionId, nextTreeVersion, rawTree, parseResult.tree);
 
     this.snapshots.set(session.transactionId, snapshot);
     return snapshot;
@@ -722,9 +723,9 @@ function parseSourceText(
   language: ParserLanguage,
   filePath: string,
   sourceText: string,
-): TreeSitterNode {
+): { rootNode: TreeSitterNode; tree: any } {
   const parseResult = treeSitterParse(language, sourceText);
-  return parseResult.tree.rootNode;
+  return { rootNode: parseResult.tree.rootNode, tree: parseResult.tree };
 }
 
 function buildRawTree(
@@ -805,6 +806,7 @@ function materializeInitialTree(
   transactionId: string,
   treeVersion: number,
   rawTree: RawTree,
+  cachedTree?: any,
 ): TreeSnapshot {
   const usedNodeIds = new Set<string>();
   const instanceToNodeId = new Map<string, string>();
@@ -836,6 +838,7 @@ function materializeInitialTree(
       fallbackMatches: 0,
       stabilityScore: 1,
     },
+    cachedTree,
   );
 }
 
@@ -844,6 +847,7 @@ function reconcileTree(
   treeVersion: number,
   previous: TreeSnapshot,
   rawTree: RawTree,
+  cachedTree?: any,
 ): TreeSnapshot {
   const usedOldNodeIds = new Set<string>();
   const instanceToNodeId = new Map<string, string>();
@@ -946,6 +950,7 @@ function reconcileTree(
       fallbackMatches: counters.fallbackMatches,
       stabilityScore,
     },
+    cachedTree,
   );
 }
 
@@ -955,6 +960,7 @@ function materializeSnapshotFromRaw(
   rawTree: RawTree,
   instanceToNodeId: Map<string, string>,
   identityMetrics: IdentityMetrics,
+  cachedTree?: any,
 ): TreeSnapshot {
   const nodesById = new Map<string, ParsedNodeRecord>();
 
@@ -1035,6 +1041,7 @@ function materializeSnapshotFromRaw(
     mutationCount: 0,
     tombstones: new Set<string>(),
     changedNodeIds: new Set<string>(),
+    cachedTree,
   };
 }
 

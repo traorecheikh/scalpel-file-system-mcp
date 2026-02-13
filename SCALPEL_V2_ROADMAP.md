@@ -26,8 +26,8 @@ Future State (V2):
 **Solution**: Expose a powerful query language (simplified Tree-sitter query or CSS-selector-like syntax) to find nodes without reading the file.
 
 *   **Design Sketch**:
-    *   New Tool: `scalpel_query(selector: string, context_lines: number)`
-    *   Selector: `function[name="fetchData"] > parameter`
+    *   New Tool: `scalpel_search_structure(selector: string, context_lines: number)`
+    *   Selector: `function_declaration[name="fetchData"]`
     *   Returns: List of Node IDs + minimal signature/context.
 *   **Token Savings**: **99% reduction** for navigation. (From 10k tokens to <100).
 *   **Complexity**: Medium (Wrapper around Tree-sitter queries).
@@ -48,8 +48,8 @@ Future State (V2):
 **Problem**: Primitive ops (`insert_child`, `replace_node`) are too low-level. "Add a parameter" requires finding the parameter list node, calculating index, etc.
 **Solution**: High-level "Intents" that compile to primitives server-side.
 *   **Design Sketch**:
-    *   `scalpel_edit(intent: "add_parameter", target: "fn_123", args: { ... })`
-    *   `scalpel_edit(intent: "wrap", target: "stmt_456", template: "try { $node } catch (e) { ... }")`
+    *   `scalpel_edit_intent(intent: "add_parameter", target: "fn_123", args: { ... })`
+    *   `scalpel_edit_intent(intent: "wrap", target: "stmt_456", template: "try { $node } catch (e) { ... }")`
     *   Server handles the AST traversal to find the exact insertion point (e.g., finding the `parameters` node inside `function_declaration`).
 *   **Token Savings**: **5-10x reduction** in round trips and thought tokens.
 *   **Complexity**: Medium (Language-specific logic maps).
@@ -59,8 +59,8 @@ Future State (V2):
 **Problem**: JSON descriptors are verbose (`{ "kind": "parameter", "fields": { "name": "x", "type": "string" } }`).
 **Solution**: A micro-DSL for node creation.
 *   **Design Sketch**:
-    *   Instead of JSON, accept: `param(x: string = "default")`
-    *   `import(module: "fs", symbol: "readFileSync")`
+    *   Instead of JSON, accept: `param(x,string,"default")`
+    *   `import(fs,readFileSync)`
     *   Server parses this "shorthand" into the AST descriptor.
 *   **Token Savings**: **50-70% reduction** in input tokens.
 *   **Complexity**: Low (Simple parser).
@@ -84,26 +84,26 @@ Future State (V2):
 
 1.  `scalpel_open(file_path)` -> `{ status: "ready", structural_summary: "..." }`
     *   Loads file, returns top-level structure (classes, functions) with IDs.
-2.  `scalpel_query(selector)` -> `[{ id: "...", type: "...", text_snippet: "..." }]`
+2.  `scalpel_search_structure(selector)` -> `[{ id: "...", type: "...", text_snippet: "..." }]`
     *   Finds nodes by pattern.
-3.  `scalpel_mutate(mutations: Batch[])`
-    *   `Batch` item: `{ intent: "add_param", target: "id", ... }` or `{ op: "insert", ... }`
+3.  `scalpel_edit_intent(intent, args)` -> `{ operations: [...] }`
+    *   Compiles high-level intents into primitive operations.
 4.  `scalpel_commit()` -> `{ status: "saved", new_version: "..." }`
 
 ### Removed/Deprecated
-*   `scalpel_list_nodes` (replaced by `query` and `open`)
-*   `scalpel_insert_child` (moved to `mutate` primitive)
+*   `scalpel_list_nodes` (replaced by `scalpel_search_structure`)
+*   Low-level operations (`scalpel_insert_child`, etc.) can be replaced by `scalpel_edit_intent` for common tasks
 
 ---
 
 ## 📅 Migration Path
 
 1.  **Phase 1: The Query Engine** (Week 1)
-    *   Implement `scalpel_query` using Tree-sitter queries.
+    *   Implement `scalpel_search_structure` using Tree-sitter queries.
     *   This delivers immediate value by removing the need to read full files.
 
 2.  **Phase 2: The Batcher & Macros** (Week 2)
-    *   Implement `scalpel_mutate` that accepts arrays.
+    *   Implement `scalpel_edit_intent` that accepts high-level intents.
     *   Add first 3 macros: `add_parameter`, `add_import`, `add_class_member`.
 
 3.  **Phase 3: Persistent Identity** (Week 3)

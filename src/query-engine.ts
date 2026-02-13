@@ -80,8 +80,12 @@ export class QueryEngine {
   private compileSelector(selector: string): string {
     // Simple selector compiler:
     // type[field="value"] -> (type field: (_) @val (#eq? @val "value")) @match
-
-    const parts = selector.match(/^([a-zA-Z_]+)(?:\[([a-zA-Z_]+)=['"](.+?)['"]\])?$/);
+    
+    // More robust regex that handles escaped quotes and greedy matching
+    // Match: type[field="value"] or type[field='value']
+    // Note: This regex handles most common cases but may not work with values
+    // that have unusual quote patterns. For complex queries, use raw S-expressions.
+    const parts = selector.match(/^([a-zA-Z_]+)(?:\[([a-zA-Z_]+)=(['"])(.+?)\3\])?$/);
     if (!parts) {
       // Fallback: wrap in generic match if it looks like a type
       if (/^[a-zA-Z_]+$/.test(selector)) {
@@ -94,10 +98,13 @@ export class QueryEngine {
 
     const type = parts[1];
     const field = parts[2];
-    const value = parts[3];
+    const quoteChar = parts[3];
+    const value = parts[4];
 
-    if (field && value) {
-        return `(${type} ${field}: (_) @val (#eq? @val "${value}")) @match`;
+    if (field && value !== undefined) {
+        // Escape backslashes and double quotes in the value for the query string
+        const escapedValue = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+        return `(${type} ${field}: (_) @val (#eq? @val "${escapedValue}")) @match`;
     } else {
         return `(${type}) @match`;
     }
