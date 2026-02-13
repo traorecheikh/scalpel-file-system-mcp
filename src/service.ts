@@ -27,6 +27,7 @@ import type {
   ParsedNodeRecord,
   TreeSnapshot,
 } from "./tree-store.js";
+import { TreeStore } from "./tree-store.js";
 import { QueryEngine } from "./query-engine.js";
 import { IntentCompiler } from "./intent-compiler.js";
 import { parseSourceText } from "./tree-sitter-parser.js";

@@ -80,8 +80,9 @@ export class QueryEngine {
   private compileSelector(selector: string): string {
     // Simple selector compiler:
     // type[field="value"] -> (type field: (_) @val (#eq? @val "value")) @match
+    // Improved regex to better handle quoted values with potential escapes
 
-    const parts = selector.match(/^([a-zA-Z_]+)(?:\[([a-zA-Z_]+)=['"](.+?)['"]\])?$/);
+    const parts = selector.match(/^([a-zA-Z_]+)(?:\[([a-zA-Z_]+)=["']([^"']*(?:\\.[^"']*)*)["']\])?$/);
     if (!parts) {
       // Fallback: wrap in generic match if it looks like a type
       if (/^[a-zA-Z_]+$/.test(selector)) {
@@ -97,7 +98,9 @@ export class QueryEngine {
     const value = parts[3];
 
     if (field && value) {
-        return `(${type} ${field}: (_) @val (#eq? @val "${value}")) @match`;
+        // Escape backslashes and quotes in the value to prevent malformed queries
+        const escapedValue = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+        return `(${type} ${field}: (_) @val (#eq? @val "${escapedValue}")) @match`;
     } else {
         return `(${type}) @match`;
     }
