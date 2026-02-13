@@ -116,11 +116,13 @@ const TARGET_KIND_BY_NODE_TYPE: Record<string, DescriptorKind> = {
   import_specifier: "import_specifier",
 };
 
-export interface NodeDescriptorInput {
-  type: string;
-  value?: unknown;
-  fields?: Record<string, unknown>;
-}
+export type NodeDescriptorInput =
+  | {
+      type: string;
+      value?: unknown;
+      fields?: Record<string, unknown>;
+    }
+  | string;
 
 export interface CompiledDescriptor {
   kind: DescriptorKind;
@@ -195,6 +197,10 @@ export function compileDescriptorForReplace(
 }
 
 function normalizeDescriptor(input: NodeDescriptorInput): NormalizedDescriptor {
+  if (typeof input === "string") {
+    return parseShorthand(input);
+  }
+
   const rawType = typeof input.type === "string" ? input.type.trim() : "";
   if (!rawType) {
     throw new ToolError("VALIDATION_ERROR", "node descriptor type is required");
@@ -216,6 +222,123 @@ function normalizeDescriptor(input: NodeDescriptorInput): NormalizedDescriptor {
     value: input.value,
     fields: input.fields ?? {},
   };
+}
+
+/**
+ * Parse CSV-like arguments, handling commas within quoted strings.
+ * Examples:
+ *   "a,b,c" -> ["a", "b", "c"]
+ *   'x,"hello, world",z' -> ["x", "hello, world", "z"]
+ *   "name,string,null" -> ["name", "string", "null"]
+ */
+function parseCSVArgs(input: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  let quoteChar = "";
+  let i = 0;
+  
+  while (i < input.length) {
+    const char = input[i];
+    
+    if ((char === '"' || char === "'") && !inQuotes) {
+      // Opening quote
+      inQuotes = true;
+      quoteChar = char;
+      i++;
+    } else if (char === quoteChar && inQuotes) {
+      // Check if this quote is escaped
+      const prevChar = i > 0 ? input[i - 1] : "";
+      if (prevChar === "\\") {
+        // Escaped quote: remove the backslash we just added, add the quote
+        current = current.slice(0, -1) + char;
+        i++;
+      } else {
+        // Closing quote
+        inQuotes = false;
+        quoteChar = "";
+        i++;
+      }
+    } else if (char === "," && !inQuotes) {
+      args.push(current.trim());
+      current = "";
+      i++;
+    } else {
+      current += char;
+      i++;
+    }
+  }
+  
+  if (current || args.length > 0) {
+    args.push(current.trim());
+  }
+  
+  return args;
+}
+
+function parseShorthand(input: string): NormalizedDescriptor {
+  // +param(name,type,val) or param(name,type,val)
+  const match = input.match(/^([+]?)([a-zA-Z_]+)\((.*)\)$/);
+  if (!match) {
+    throw new ToolError(
+      "VALIDATION_ERROR",
+      `Invalid shorthand descriptor syntax: ${input}`,
+    );
+  }
+
+  const kindAlias = match[2];
+  const argsStr = match[3] ?? "";
+
+  // Parse CSV-like arguments, handling commas within quoted strings
+  const args = parseCSVArgs(argsStr);
+
+  if (kindAlias === "param" || kindAlias === "parameter") {
+    const name = args[0];
+    const type = args[1];
+    const val = args[2];
+
+    const fields: Record<string, any> = { name };
+    if (type) fields.datatype = type;
+    if (val !== undefined) fields.value = parseLiteralValue(val);
+
+    return { kind: "parameter", value: undefined, fields };
+  }
+
+  if (kindAlias === "import") {
+    const name = args[0];
+    const alias = args[1];
+    const fields: Record<string, any> = { name };
+    if (alias) fields.alias = alias;
+    return { kind: "import_specifier", value: undefined, fields };
+  }
+
+  if (kindAlias === "field") {
+    const name = args[0];
+    const type = args[1];
+    const val = args[2];
+    const fields: Record<string, any> = { name };
+    if (type) fields.datatype = type;
+    if (val !== undefined) fields.value = parseLiteralValue(val);
+    return { kind: "field", value: undefined, fields };
+  }
+
+  throw new ToolError("VALIDATION_ERROR", `Unknown shorthand kind: ${kindAlias}`);
+}
+
+function parseLiteralValue(val: string): any {
+  if (val === "true") return true;
+  if (val === "false") return false;
+  if (val === "null") return null;
+  const trimmed = val.trim();
+  if (!isNaN(Number(trimmed)) && trimmed !== "") return Number(trimmed);
+  // quoted string
+  if (
+    (val.startsWith('"') && val.endsWith('"')) ||
+    (val.startsWith("'") && val.endsWith("'"))
+  ) {
+    return val.slice(1, -1);
+  }
+  return val;
 }
 
 function compileDescriptor(descriptor: NormalizedDescriptor): CompiledDescriptor {
@@ -301,6 +424,9 @@ function compileParameter(descriptor: NormalizedDescriptor): CompiledDescriptor 
   const fields: Record<string, unknown> = { name, optional };
   if (datatype) {
     fields.datatype = datatype;
+  }
+  if (descriptor.fields.value !== undefined) {
+    fields.value = descriptor.fields.value;
   }
 
   const compiled: CompiledDescriptor = {

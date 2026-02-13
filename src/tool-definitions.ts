@@ -22,8 +22,67 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         },
         language: {
           type: "string",
-          enum: ["typescript", "javascript", "dart", "java", "rust"],
+          enum: [
+            "css",
+            "dart",
+            "go",
+            "html",
+            "java",
+            "javascript",
+            "json",
+            "markdown",
+            "python",
+            "rust",
+            "typescript",
+            "yaml",
+          ],
           description: "Optional language override.",
+        },
+      },
+      required: ["file"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "scalpel_create_file",
+    description: "Create a new file and automatically start a mutation transaction.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: {
+          type: "string",
+          minLength: 1,
+          maxLength: 4096,
+          description: "Workspace-relative file path.",
+        },
+        language: {
+          type: "string",
+          enum: [
+            "css",
+            "dart",
+            "go",
+            "html",
+            "java",
+            "javascript",
+            "json",
+            "markdown",
+            "python",
+            "rust",
+            "typescript",
+            "yaml",
+          ],
+          description: "Language of the file (inferred from extension if not provided).",
+        },
+        initial_content: {
+          type: "string",
+          maxLength: 10000000,
+          description: "Optional initial content for the file.",
+          default: "",
+        },
+        overwrite: {
+          type: "boolean",
+          description: "Overwrite if file already exists.",
+          default: false,
         },
       },
       required: ["file"],
@@ -47,6 +106,53 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
         },
       },
       required: ["file", "transaction_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "scalpel_search_structure",
+    description:
+      "Search for nodes using a simplified structural query language or raw tree-sitter queries.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", minLength: 1, maxLength: 4096 },
+        transaction_id: { type: "string", minLength: 1, maxLength: 128 },
+        selector: {
+          type: "string",
+          minLength: 1,
+          maxLength: 1024,
+          description: "Structural selector (e.g. 'function_declaration[name=\"foo\"]') or raw tree-sitter query.",
+        },
+      },
+      required: ["file", "transaction_id", "selector"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "scalpel_edit_intent",
+    description:
+      "Execute a batch of structural edits or high-level intent macros.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", minLength: 1, maxLength: 4096 },
+        transaction_id: { type: "string", minLength: 1, maxLength: 128 },
+        intents: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              intent: { type: "string", minLength: 1, maxLength: 64 },
+              args: { type: "object", additionalProperties: true },
+            },
+            required: ["intent", "args"],
+          },
+          maxItems: 100,
+        },
+        dry_run: { type: "boolean", default: false },
+      },
+      required: ["file", "transaction_id", "intents"],
       additionalProperties: false,
     },
   },

@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { access } from "node:fs/promises";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AppConfig } from "./config.js";
 import { ToolError } from "./errors.js";
@@ -20,37 +20,68 @@ import type {
 import { resolveWorkspacePath } from "./path-safety.js";
 import type { TransactionSession } from "./transaction-store.js";
 import { TransactionStore } from "./transaction-store.js";
-import type {
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import {
   IdentityMetrics,
   MutationOperationResult,
   NodeDescriptorInput,
   ParsedNodeRecord,
+  serializeSnapshot,
   TreeSnapshot,
+  TreeStore,
 } from "./tree-store.js";
-import { TreeStore } from "./tree-store.js";
+import { QueryEngine } from "./query-engine.js";
+import { IntentCompiler } from "./intent-compiler.js";
+import { parseSourceText } from "./tree-sitter-parser.js";
+import { generateDiff, type DiffOutput } from "./diff-generator.js";
+import { paginate, type PaginationInfo } from "./pagination.js";
 
 const EXTENSION_LANGUAGE_MAP: Record<string, SupportedLanguage> = {
-  ".ts": "typescript",
-  ".tsx": "typescript",
-  ".js": "javascript",
-  ".jsx": "javascript",
-  ".mjs": "javascript",
-  ".cjs": "javascript",
-  ".dart": "dart",
+  // Existing
+  ".ts": "typescript", ".tsx": "typescript",
+  ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
   ".java": "java",
+  ".dart": "dart",
   ".rs": "rust",
+
+  // New
+  ".md": "markdown", ".markdown": "markdown", ".mdx": "markdown",
+  ".json": "json", ".jsonc": "json",
+  ".yaml": "yaml", ".yml": "yaml",
+  ".html": "html", ".htm": "html", ".xhtml": "html",
+  ".css": "css", ".scss": "css", ".sass": "css", ".less": "css",
+  ".py": "python", ".pyi": "python", ".pyx": "python",
+  ".go": "go",
 };
 
-const SUPPORTED_LANGUAGES = [
-  "typescript",
-  "javascript",
-  "dart",
-  "java",
-  "rust",
-] as const;
+const FILENAME_LANGUAGE_MAP: Record<string, SupportedLanguage> = {
+  // Markdown
+  "README": "markdown",
+  "CHANGELOG": "markdown",
+  "CONTRIBUTING": "markdown",
+  "LICENSE": "markdown",
+
+  // JSON
+  ".babelrc": "json",
+  ".eslintrc": "json",
+  ".prettierrc": "json",
+
+  // YAML
+  ".clang-format": "yaml",
+
+  // Other (Python-like syntax or common extensionless)
+  "Dockerfile": "python",
+  "Makefile": "python",
+};
+
+const SUPPORTED_LANGUAGES: SupportedLanguage[] = [
+  "typescript", "javascript", "java", "dart", "rust",
+  "markdown", "json", "yaml", "html", "css", "python", "go"
+];
 
 export class ScalpelService {
   private readonly trees: TreeStore;
+  private server?: Server;
 
   public constructor(
     private readonly config: AppConfig,
@@ -58,6 +89,10 @@ export class ScalpelService {
     private readonly transactions: TransactionStore,
   ) {
     this.trees = new TreeStore();
+  }
+
+  public setServer(server: Server): void {
+    this.server = server;
   }
 
   public async beginTransaction(args: ScalpelBeginTransactionArgs): Promise<{
@@ -83,14 +118,11 @@ export class ScalpelService {
     await assertFileIsReadable(absoluteFilePath);
 
     const session = this.transactions.begin(args.file, absoluteFilePath, language);
-    let parsedRootNodeId: string | undefined;
-    let parsedNodeCount: number | undefined;
-
-    if (language === "typescript" || language === "javascript") {
-      const snapshot = await this.trees.hydrate(session);
-      parsedRootNodeId = snapshot.rootNodeId;
-      parsedNodeCount = snapshot.nodeCount;
-    }
+    
+    // Always hydrate for all supported languages
+    const snapshot = await this.trees.hydrate(session);
+    const parsedRootNodeId = snapshot.rootNodeId;
+    const parsedNodeCount = snapshot.nodeCount;
 
     this.logger.info("Transaction started", {
       transactionId: session.transactionId,
@@ -124,6 +156,65 @@ export class ScalpelService {
     return result;
   }
 
+  public async createFile(args: ScalpelCreateFileArgs): Promise<{
+    transactionId: string;
+    file: string;
+    language: SupportedLanguage;
+    created: boolean;
+    bytesWritten: number;
+  }> {
+    const absoluteFilePath = resolveWorkspacePath(this.config.workspaceRoot, args.file);
+
+    // Check existence
+    let fileExists = false;
+    try {
+      await access(absoluteFilePath, constants.F_OK);
+      fileExists = true;
+    } catch {
+      // File doesn't exist - OK
+    }
+
+    if (fileExists && !args.overwrite) {
+      throw new ToolError(
+        "INVALID_OPERATION",
+        `File already exists: ${args.file}. Use overwrite=true to replace.`,
+      );
+    }
+
+    // Infer language
+    const inferredLanguage = inferLanguageFromPath(absoluteFilePath);
+    const language = args.language ?? inferredLanguage;
+
+    if (!language) {
+      throw new ToolError(
+        "INVALID_OPERATION",
+        "Unable to infer file language. Provide language explicitly.",
+      );
+    }
+
+    // Create parent directories
+    const parentDir = path.dirname(absoluteFilePath);
+    await mkdir(parentDir, { recursive: true });
+
+    // Write file
+    const content = args.initial_content ?? "";
+    await writeFile(absoluteFilePath, content, "utf8");
+
+    // Auto-start transaction
+    const session = this.transactions.begin(args.file, absoluteFilePath, language);
+
+    // Pre-hydrate to ensure it's valid and get initial metrics
+    await this.trees.hydrate(session);
+
+    return {
+      transactionId: session.transactionId,
+      file: args.file,
+      language,
+      created: !fileExists,
+      bytesWritten: Buffer.byteLength(content, "utf8"),
+    };
+  }
+
   public async listNodes(args: ScalpelListNodesArgs): Promise<{
     transactionId: string;
     file: string;
@@ -140,20 +231,30 @@ export class ScalpelService {
     }>;
     total_node_count: number;
     identity_metrics: IdentityMetrics;
+    pagination: PaginationInfo;
   }> {
     const session = this.requireSessionForFile(args.transaction_id, args.file);
     const snapshot = await this.ensureSnapshot(session);
     this.transactions.touch(session.transactionId);
 
     const filters = args.filter_by_type ? new Set(args.filter_by_type) : undefined;
-    const nodes = traverseByDepth(snapshot.rootNodeId, snapshot, args.depth)
+    const startNodeId = args.filter_by_parent ?? snapshot.rootNodeId;
+    
+    const allNodes = traverseByDepth(startNodeId, snapshot, args.depth)
       .filter((record) => {
         if (!filters) {
           return true;
         }
         return filters.has(record.type);
-      })
-      .map((record) => mapNodeRecord(record));
+      });
+
+    const paginated = paginate(
+      allNodes,
+      args.limit ?? 100,
+      args.cursor,
+      snapshot.treeVersion,
+    );
+    const nodes = paginated.items.map((record) => mapNodeRecord(record));
 
     return {
       transactionId: session.transactionId,
@@ -163,6 +264,121 @@ export class ScalpelService {
       nodes,
       total_node_count: snapshot.nodeCount,
       identity_metrics: snapshot.identityMetrics,
+      pagination: paginated.pagination,
+    };
+  }
+
+  public async searchStructure(args: {
+    transaction_id: string;
+    file: string;
+    selector: string;
+  }): Promise<{
+    transactionId: string;
+    file: string;
+    treeVersion: number;
+    matches: Array<{
+      node_id: string;
+      type: string;
+      text_snippet: string;
+      start_index: number;
+      end_index: number;
+    }>;
+  }> {
+    const session = this.requireSessionForFile(args.transaction_id, args.file);
+    const snapshot = await this.ensureSnapshot(session);
+    this.transactions.touch(session.transactionId);
+
+    const nodeIdMap = new Map<string, string>();
+    for (const [id, record] of snapshot.nodesById) {
+      nodeIdMap.set(`${record.startOffset}:${record.endOffset}:${record.type}`, id);
+    }
+
+    // Use cached tree if available, otherwise re-parse
+    let tree;
+    if (snapshot.cachedTree) {
+      tree = snapshot.cachedTree;
+    } else {
+      const parseResult = parseSourceText(snapshot.language, snapshot.sourceText);
+      tree = parseResult.tree;
+    }
+
+    const results = QueryEngine.getInstance().runQuery(
+      snapshot.language,
+      tree.rootNode,
+      args.selector,
+      nodeIdMap,
+    );
+
+    return {
+      transactionId: session.transactionId,
+      file: session.file,
+      treeVersion: snapshot.treeVersion,
+      matches: results.map((r) => ({
+        node_id: r.nodeId,
+        type: r.type,
+        text_snippet: r.textSnippet,
+        start_index: r.startIndex,
+        end_index: r.endIndex,
+      })),
+    };
+  }
+
+  public async editIntent(args: {
+    transaction_id: string;
+    file: string;
+    intents: Array<{ intent: string; args: Record<string, unknown> }>;
+    dry_run: boolean;
+  }): Promise<{
+    transactionId: string;
+    file: string;
+    results: Array<unknown>;
+    treeVersion: number;
+  }> {
+    if (args.dry_run) {
+      throw new ToolError(
+        "NOT_IMPLEMENTED",
+        "Dry run is not supported in this version.",
+      );
+    }
+
+    const session = this.requireSessionForFile(args.transaction_id, args.file);
+    const results: Array<unknown> = [];
+
+    // Execute sequentially
+    for (const intent of args.intents) {
+      // Re-fetch snapshot as it updates after each op
+      const snapshot = await this.ensureSnapshot(session);
+      const compiler = new IntentCompiler(snapshot);
+      const ops = compiler.compile(intent.intent, intent.args, {
+        file: args.file,
+        transaction_id: args.transaction_id,
+      });
+
+      for (const op of ops) {
+        let result;
+        if (op.tool === "scalpel_insert_child") {
+          result = await this.insertChild(op.args as any);
+        } else if (op.tool === "scalpel_replace_node") {
+          result = await this.replaceNode(op.args as any);
+        } else if (op.tool === "scalpel_remove_node") {
+          result = await this.removeNode(op.args as any);
+        } else if (op.tool === "scalpel_move_subtree") {
+          result = await this.moveSubtree(op.args as any);
+        } else {
+          throw new ToolError("INTERNAL_ERROR", `Unknown tool op: ${op.tool}`);
+        }
+        results.push(result);
+      }
+    }
+
+    // Get final version
+    const finalSnapshot = this.trees.require(session.transactionId);
+
+    return {
+      transactionId: session.transactionId,
+      file: session.file,
+      results,
+      treeVersion: finalSnapshot.treeVersion,
     };
   }
 
@@ -253,9 +469,12 @@ export class ScalpelService {
     no_op: boolean;
     new_node_id?: string;
     removed_node_ids?: string[];
+    diff?: DiffOutput;
   }> {
     const session = this.requireSessionForFile(args.transaction_id, args.file);
-    await this.ensureSnapshot(session);
+    const snapshotBefore = await this.ensureSnapshot(session);
+    const sourceTextBefore = serializeSnapshot(snapshotBefore);
+
     const result = this.trees.insertChild(
       session.transactionId,
       args.parent_node_id,
@@ -263,7 +482,20 @@ export class ScalpelService {
       args.node_descriptor as NodeDescriptorInput,
     );
     this.transactions.touch(session.transactionId);
-    return mapMutationResponse(session, args.file, result);
+
+    const snapshotAfter = this.trees.require(session.transactionId);
+    const sourceTextAfter = serializeSnapshot(snapshotAfter);
+    const affectedNodeBefore = snapshotAfter.nodesById.get(args.parent_node_id)!;
+    
+    const diff = result.noOp ? undefined : generateDiff({
+        sourceTextBefore,
+        sourceTextAfter,
+        affectedNodeBefore,
+        affectedNodeAfter: snapshotAfter.nodesById.get(args.parent_node_id)!,
+        contextLines: 3
+    });
+
+    return mapMutationResponse(session, args.file, result, diff);
   }
 
   public async replaceNode(args: ScalpelReplaceNodeArgs): Promise<{
@@ -275,16 +507,43 @@ export class ScalpelService {
     no_op: boolean;
     new_node_id?: string;
     removed_node_ids?: string[];
+    diff?: DiffOutput;
   }> {
     const session = this.requireSessionForFile(args.transaction_id, args.file);
-    await this.ensureSnapshot(session);
+    const snapshotBefore = await this.ensureSnapshot(session);
+    const sourceTextBefore = serializeSnapshot(snapshotBefore);
+    const nodeBefore = snapshotBefore.nodesById.get(args.node_id);
+    if (!nodeBefore) throw new ToolError("NOT_FOUND", "Node not found", { node_id: args.node_id });
+    const nodeBeforeCloned = { ...nodeBefore };
+
     const result = this.trees.replaceNode(
       session.transactionId,
       args.node_id,
       args.new_node_descriptor as NodeDescriptorInput,
     );
     this.transactions.touch(session.transactionId);
-    return mapMutationResponse(session, args.file, result);
+
+    const snapshotAfter = this.trees.require(session.transactionId);
+    const sourceTextAfter = serializeSnapshot(snapshotAfter);
+    
+    let diff: DiffOutput | undefined;
+    if (!result.noOp) {
+      const affectedAfter = snapshotAfter.nodesById.get(args.node_id);
+      diff = affectedAfter ? generateDiff({
+        sourceTextBefore,
+        sourceTextAfter,
+        affectedNodeBefore: nodeBeforeCloned,
+        affectedNodeAfter: affectedAfter,
+        contextLines: 3
+      }) : generateDiff({
+        sourceTextBefore,
+        sourceTextAfter,
+        affectedNodeBefore: nodeBeforeCloned,
+        contextLines: 3
+      });
+    }
+
+    return mapMutationResponse(session, args.file, result, diff);
   }
 
   public async removeNode(args: ScalpelRemoveNodeArgs): Promise<{
@@ -296,12 +555,29 @@ export class ScalpelService {
     no_op: boolean;
     new_node_id?: string;
     removed_node_ids?: string[];
+    diff?: DiffOutput;
   }> {
     const session = this.requireSessionForFile(args.transaction_id, args.file);
-    await this.ensureSnapshot(session);
+    const snapshotBefore = await this.ensureSnapshot(session);
+    const sourceTextBefore = serializeSnapshot(snapshotBefore);
+    const nodeBefore = snapshotBefore.nodesById.get(args.node_id);
+    if (!nodeBefore) throw new ToolError("NOT_FOUND", "Node not found", { node_id: args.node_id });
+    const nodeBeforeCloned = { ...nodeBefore };
+
     const result = this.trees.removeNode(session.transactionId, args.node_id);
     this.transactions.touch(session.transactionId);
-    return mapMutationResponse(session, args.file, result);
+
+    const snapshotAfter = this.trees.require(session.transactionId);
+    const sourceTextAfter = serializeSnapshot(snapshotAfter);
+
+    const diff = result.noOp ? undefined : generateDiff({
+        sourceTextBefore,
+        sourceTextAfter,
+        affectedNodeBefore: nodeBeforeCloned,
+        contextLines: 3
+    });
+
+    return mapMutationResponse(session, args.file, result, diff);
   }
 
   public async moveSubtree(args: ScalpelMoveSubtreeArgs): Promise<{
@@ -313,9 +589,15 @@ export class ScalpelService {
     no_op: boolean;
     new_node_id?: string;
     removed_node_ids?: string[];
+    diff?: DiffOutput;
   }> {
     const session = this.requireSessionForFile(args.transaction_id, args.file);
-    await this.ensureSnapshot(session);
+    const snapshotBefore = await this.ensureSnapshot(session);
+    const sourceTextBefore = serializeSnapshot(snapshotBefore);
+    const nodeBefore = snapshotBefore.nodesById.get(args.node_id);
+    if (!nodeBefore) throw new ToolError("NOT_FOUND", "Node not found", { node_id: args.node_id });
+    const nodeBeforeCloned = { ...nodeBefore };
+
     const result = this.trees.moveSubtree(
       session.transactionId,
       args.node_id,
@@ -323,7 +605,28 @@ export class ScalpelService {
       args.new_position,
     );
     this.transactions.touch(session.transactionId);
-    return mapMutationResponse(session, args.file, result);
+
+    const snapshotAfter = this.trees.require(session.transactionId);
+    const sourceTextAfter = serializeSnapshot(snapshotAfter);
+
+    let diff: DiffOutput | undefined;
+    if (!result.noOp) {
+      const affectedAfter = snapshotAfter.nodesById.get(args.node_id);
+      diff = affectedAfter ? generateDiff({
+        sourceTextBefore,
+        sourceTextAfter,
+        affectedNodeBefore: nodeBeforeCloned,
+        affectedNodeAfter: affectedAfter,
+        contextLines: 3
+      }) : generateDiff({
+        sourceTextBefore,
+        sourceTextAfter,
+        affectedNodeBefore: nodeBeforeCloned,
+        contextLines: 3
+      });
+    }
+
+    return mapMutationResponse(session, args.file, result, diff);
   }
 
   public async validateTransaction(
@@ -362,14 +665,57 @@ export class ScalpelService {
     new_tree_version: number;
   }> {
     const session = this.requireSessionForFile(args.transaction_id, args.file);
+
+    // 0% - Starting
+    await this.server?.notification({
+      method: "notifications/progress",
+      params: {
+        progressToken: args.transaction_id,
+        progress: 0,
+        total: 100,
+      },
+    });
+
     await this.ensureSnapshot(session);
+
+    // 25% - Tree hydrated
+    await this.server?.notification({
+      method: "notifications/progress",
+      params: {
+        progressToken: args.transaction_id,
+        progress: 25,
+        total: 100,
+      },
+    });
+
     const result = await this.trees.commit(
       session.transactionId,
       session.absoluteFilePath,
     );
+
+    // 75% - Tree committed
+    await this.server?.notification({
+      method: "notifications/progress",
+      params: {
+        progressToken: args.transaction_id,
+        progress: 75,
+        total: 100,
+      },
+    });
+
     session.workingVersion = result.treeVersion;
     session.committedVersion = result.treeVersion;
     this.transactions.touch(session.transactionId);
+
+    // 100% - Complete
+    await this.server?.notification({
+      method: "notifications/progress",
+      params: {
+        progressToken: args.transaction_id,
+        progress: 100,
+        total: 100,
+      },
+    });
 
     return {
       transactionId: session.transactionId,
@@ -435,19 +781,25 @@ export class ScalpelService {
   }
 
   private async ensureSnapshot(session: TransactionSession): Promise<TreeSnapshot> {
-    if (session.language !== "typescript" && session.language !== "javascript") {
-      throw new ToolError(
-        "NOT_IMPLEMENTED",
-        `Language ${session.language} parser is not implemented yet (Phase 1 supports TS/JS only).`,
-      );
-    }
     return this.trees.hydrate(session);
   }
 }
 
 function inferLanguageFromPath(filePath: string): SupportedLanguage | undefined {
   const extension = path.extname(filePath).toLowerCase();
-  return EXTENSION_LANGUAGE_MAP[extension];
+
+  // Try extension first
+  if (extension && EXTENSION_LANGUAGE_MAP[extension]) {
+    return EXTENSION_LANGUAGE_MAP[extension];
+  }
+
+  // Try filename (extensionless files)
+  const basename = path.basename(filePath);
+  if (FILENAME_LANGUAGE_MAP[basename]) {
+    return FILENAME_LANGUAGE_MAP[basename];
+  }
+
+  return undefined;
 }
 
 async function assertFileIsReadable(filePath: string): Promise<void> {
@@ -522,6 +874,7 @@ function mapMutationResponse(
   session: TransactionSession,
   file: string,
   result: MutationOperationResult,
+  diff?: DiffOutput,
 ): {
   transactionId: string;
   file: string;
@@ -531,6 +884,7 @@ function mapMutationResponse(
   no_op: boolean;
   new_node_id?: string;
   removed_node_ids?: string[];
+  diff?: DiffOutput;
 } {
   const response: {
     transactionId: string;
@@ -541,6 +895,7 @@ function mapMutationResponse(
     no_op: boolean;
     new_node_id?: string;
     removed_node_ids?: string[];
+    diff?: DiffOutput;
   } = {
     transactionId: session.transactionId,
     file,
@@ -549,6 +904,10 @@ function mapMutationResponse(
     semantic_change: result.semanticChange,
     no_op: result.noOp,
   };
+
+  if (diff) {
+    response.diff = diff;
+  }
 
   if (result.newNodeId) {
     response.new_node_id = result.newNodeId;

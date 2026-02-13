@@ -1,7 +1,10 @@
 export const TOOL_NAMES = [
   "scalpel_begin_transaction",
+  "scalpel_create_file",
   "scalpel_list_nodes",
   "scalpel_get_node",
+  "scalpel_search_structure",
+  "scalpel_edit_intent",
   "scalpel_insert_child",
   "scalpel_replace_node",
   "scalpel_remove_node",

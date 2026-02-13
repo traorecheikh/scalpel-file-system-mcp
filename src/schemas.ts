@@ -2,11 +2,18 @@ import { z } from "zod";
 import type { ToolName } from "./tool-names.js";
 
 export const SupportedLanguageSchema = z.enum([
-  "typescript",
-  "javascript",
+  "css",
   "dart",
+  "go",
+  "html",
   "java",
+  "javascript",
+  "json",
+  "markdown",
+  "python",
   "rust",
+  "typescript",
+  "yaml",
 ]);
 
 const FilePathSchema = z.string().min(1).max(4096);
@@ -21,11 +28,26 @@ const DescriptorTypeSchema = z.enum([
   "raw_node",
 ]);
 
-const NodeDescriptorSchema = z
+const NodeDescriptorSchema = z.union([
+  z
+    .object({
+      type: DescriptorTypeSchema,
+      value: z.unknown().optional(),
+      fields: z.record(z.unknown()).optional(),
+    })
+    .strict(),
+  z.string().min(1).max(1024),
+]);
+
+export const DiffOutputSchema = z
   .object({
-    type: DescriptorTypeSchema,
-    value: z.unknown().optional(),
-    fields: z.record(z.unknown()).optional(),
+    before: z.string().describe("Original text"),
+    after: z.string().describe("New text"),
+    unified_diff: z.string().describe("Unified diff format (- old, + new)"),
+    changed_lines: z.object({
+      start: z.number(),
+      end: z.number(),
+    }),
   })
   .strict();
 
@@ -36,12 +58,24 @@ export const ScalpelBeginTransactionArgsSchema = z
   })
   .strict();
 
+export const ScalpelCreateFileArgsSchema = z
+  .object({
+    file: FilePathSchema,
+    language: SupportedLanguageSchema.optional(),
+    initial_content: z.string().max(10_000_000).default(""),
+    overwrite: z.boolean().default(false),
+  })
+  .strict();
+
 export const ScalpelListNodesArgsSchema = z
   .object({
     file: FilePathSchema,
     transaction_id: TransactionIdSchema,
     depth: z.number().int().min(0).max(32).default(2),
     filter_by_type: z.array(z.string().min(1).max(128)).max(64).optional(),
+    limit: z.number().int().min(1).max(1000).default(100),
+    cursor: z.string().optional().describe("Opaque pagination cursor"),
+    filter_by_parent: NodeIdSchema.optional(),
   })
   .strict();
 
@@ -52,6 +86,28 @@ export const ScalpelGetNodeArgsSchema = z
     node_id: NodeIdSchema,
     include_text: z.boolean().default(false),
     max_excerpt_bytes: z.number().int().min(32).max(16_384).default(512),
+  })
+  .strict();
+
+export const ScalpelSearchStructureArgsSchema = z
+  .object({
+    file: FilePathSchema,
+    transaction_id: TransactionIdSchema,
+    selector: z.string().min(1).max(1024),
+  })
+  .strict();
+
+const EditIntentSchema = z.object({
+  intent: z.string().min(1).max(64),
+  args: z.record(z.unknown()),
+});
+
+export const ScalpelEditIntentArgsSchema = z
+  .object({
+    file: FilePathSchema,
+    transaction_id: TransactionIdSchema,
+    intents: z.array(EditIntentSchema).max(100),
+    dry_run: z.boolean().default(false),
   })
   .strict();
 
@@ -117,8 +173,11 @@ export const ScalpelHealthCheckArgsSchema = z.object({}).strict();
 
 export const TOOL_SCHEMAS: Record<ToolName, z.ZodTypeAny> = {
   scalpel_begin_transaction: ScalpelBeginTransactionArgsSchema,
+  scalpel_create_file: ScalpelCreateFileArgsSchema,
   scalpel_list_nodes: ScalpelListNodesArgsSchema,
   scalpel_get_node: ScalpelGetNodeArgsSchema,
+  scalpel_search_structure: ScalpelSearchStructureArgsSchema,
+  scalpel_edit_intent: ScalpelEditIntentArgsSchema,
   scalpel_insert_child: ScalpelInsertChildArgsSchema,
   scalpel_replace_node: ScalpelReplaceNodeArgsSchema,
   scalpel_remove_node: ScalpelRemoveNodeArgsSchema,
@@ -133,8 +192,15 @@ export type SupportedLanguage = z.infer<typeof SupportedLanguageSchema>;
 export type ScalpelBeginTransactionArgs = z.infer<
   typeof ScalpelBeginTransactionArgsSchema
 >;
+export type ScalpelCreateFileArgs = z.infer<
+  typeof ScalpelCreateFileArgsSchema
+>;
 export type ScalpelListNodesArgs = z.infer<typeof ScalpelListNodesArgsSchema>;
 export type ScalpelGetNodeArgs = z.infer<typeof ScalpelGetNodeArgsSchema>;
+export type ScalpelSearchStructureArgs = z.infer<
+  typeof ScalpelSearchStructureArgsSchema
+>;
+export type ScalpelEditIntentArgs = z.infer<typeof ScalpelEditIntentArgsSchema>;
 export type ScalpelInsertChildArgs = z.infer<
   typeof ScalpelInsertChildArgsSchema
 >;
