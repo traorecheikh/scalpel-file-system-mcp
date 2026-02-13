@@ -15,7 +15,6 @@ test("QueryEngine can execute raw tree-sitter query", () => {
   // We need to match the start/end/type of nodes we expect to find.
   // Let's iterate the tree to populate it.
 
-  const cursor = tree.walk();
   const visit = (node: any) => {
     nodeIdMap.set(`${node.startIndex}:${node.endIndex}:${node.type}`, `id_${node.startIndex}`);
     for (const child of node.namedChildren) {
@@ -40,7 +39,6 @@ test("QueryEngine can execute simplified selector", () => {
   const { tree } = parseSourceText("javascript", source);
   const nodeIdMap = new Map<string, string>();
 
-  const cursor = tree.walk();
   const visit = (node: any) => {
     nodeIdMap.set(`${node.startIndex}:${node.endIndex}:${node.type}`, `id_${node.startIndex}`);
     for (const child of node.namedChildren) {

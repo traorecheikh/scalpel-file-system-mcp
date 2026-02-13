@@ -224,6 +224,47 @@ function normalizeDescriptor(input: NodeDescriptorInput): NormalizedDescriptor {
   };
 }
 
+/**
+ * Parse CSV-style arguments with proper handling of quoted strings containing commas.
+ * Example: 'name,string,"hello, world"' -> ['name', 'string', '"hello, world"']
+ */
+function parseCSVArgs(argsStr: string): string[] {
+  const args: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  let quoteChar = '';
+
+  for (let i = 0; i < argsStr.length; i++) {
+    const char = argsStr[i];
+    
+    if ((char === '"' || char === "'") && (i === 0 || argsStr[i - 1] !== '\\')) {
+      if (!inQuotes) {
+        inQuotes = true;
+        quoteChar = char;
+        current += char;
+      } else if (char === quoteChar) {
+        inQuotes = false;
+        quoteChar = '';
+        current += char;
+      } else {
+        current += char;
+      }
+    } else if (char === ',' && !inQuotes) {
+      args.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  
+  // Push the last argument
+  if (current.trim()) {
+    args.push(current.trim());
+  }
+  
+  return args;
+}
+
 function parseShorthand(input: string): NormalizedDescriptor {
   // +param(name,type,val) or param(name,type,val)
   const match = input.match(/^([+]?)([a-zA-Z_]+)\((.*)\)$/);
@@ -235,10 +276,10 @@ function parseShorthand(input: string): NormalizedDescriptor {
   }
 
   const kindAlias = match[2];
-  const argsStr = match[3];
+  const argsStr = match[3] || "";
 
-  // Naive CSV split (doesn't handle commas in strings properly, assume simple args)
-  const args = argsStr.split(",").map((s) => s.trim());
+  // Parse CSV args with proper handling of quoted strings
+  const args = parseCSVArgs(argsStr);
 
   if (kindAlias === "param" || kindAlias === "parameter") {
     const name = args[0];

@@ -1,6 +1,14 @@
 import { ToolError } from "./errors.js";
 import type { TreeSnapshot, ParsedNodeRecord } from "./tree-store.js";
 
+/**
+ * Represents a compiled operation to be executed
+ */
+export interface CompiledOperation {
+  tool: string;
+  args: Record<string, unknown>;
+}
+
 export class IntentCompiler {
   constructor(private snapshot: TreeSnapshot) {}
 
@@ -8,7 +16,7 @@ export class IntentCompiler {
     intent: string,
     args: Record<string, unknown>,
     commonArgs: { file: string; transaction_id: string }
-  ): Array<{ tool: string; args: any }> {
+  ): CompiledOperation[] {
     switch (intent) {
       case "add_parameter":
         return this.compileAddParameter(args, commonArgs);
@@ -28,7 +36,7 @@ export class IntentCompiler {
   private compileAddParameter(
     args: Record<string, unknown>,
     commonArgs: { file: string; transaction_id: string }
-  ): Array<{ tool: string; args: any }> {
+  ): CompiledOperation[] {
     const parentId = args.parent_node_id as string;
     if (!parentId) throw new ToolError("INVALID_OPERATION", "Missing parent_node_id for add_parameter");
 

@@ -27,6 +27,7 @@ import type {
   ParsedNodeRecord,
   TreeSnapshot,
 } from "./tree-store.js";
+import { TreeStore } from "./tree-store.js";
 import { QueryEngine } from "./query-engine.js";
 import { IntentCompiler } from "./intent-compiler.js";
 import { parseSourceText } from "./tree-sitter-parser.js";
@@ -251,13 +252,13 @@ export class ScalpelService {
       for (const op of ops) {
         let result;
         if (op.tool === "scalpel_insert_child") {
-          result = await this.insertChild(op.args);
+          result = await this.insertChild(op.args as ScalpelInsertChildArgs);
         } else if (op.tool === "scalpel_replace_node") {
-          result = await this.replaceNode(op.args);
+          result = await this.replaceNode(op.args as ScalpelReplaceNodeArgs);
         } else if (op.tool === "scalpel_remove_node") {
-          result = await this.removeNode(op.args);
+          result = await this.removeNode(op.args as ScalpelRemoveNodeArgs);
         } else if (op.tool === "scalpel_move_subtree") {
-          result = await this.moveSubtree(op.args);
+          result = await this.moveSubtree(op.args as ScalpelMoveSubtreeArgs);
         } else {
           throw new ToolError("INTERNAL_ERROR", `Unknown tool op: ${op.tool}`);
         }
