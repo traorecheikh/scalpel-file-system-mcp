@@ -93,26 +93,48 @@ export class QueryEngine {
       throw new ToolError("INVALID_OPERATION", "Selector syntax error. Use 'type' or 'type[field=\"value\"]' or raw S-expression '(type ...)'");
     }
 
-    const type = parts[1];
+    const type = parts[1]!;
     const field = parts[2];
     const value = parts[3];
 
-    if (field && value) {
-        // Escape quotes and backslashes in the value to prevent malformed queries
-        // We need to escape each character that needs escaping only once
-        let escapedValue = "";
-        for (const char of value) {
-          if (char === "\\") {
-            escapedValue += "\\\\";
-          } else if (char === '"') {
-            escapedValue += '\\"';
-          } else {
-            escapedValue += char;
-          }
-        }
-        return `(${type} ${field}: (_) @val (#eq? @val "${escapedValue}")) @match`;
-    } else {
+    if (!field || value === undefined) {
         return `(${type}) @match`;
     }
+
+    // Field and value are guaranteed to exist here
+    const fieldStr: string = field;
+    const valueStr: string = value;
+
+    // First unescape the selector value (e.g., \" -> ", \\ -> \)
+    // The regex already captured escape sequences, so we need to interpret them
+    const unescapedValue = valueStr.replace(/\\(["\\])/g, "$1");
+
+    // Now escape for tree-sitter query string (escape quotes and backslashes)
+    let escapedValue = "";
+    for (const char of unescapedValue) {
+      if (char === "\\") {
+        escapedValue += "\\\\";
+      } else if (char === '"') {
+        escapedValue += '\\"';
+      } else {
+        escapedValue += char;
+      }
+    }
+
+    const fieldType = this.inferFieldType(type, fieldStr);
+    return `(${type} ${fieldStr}: (${fieldType}) @val (#eq? @val "${escapedValue}")) @match`;
+  }
+
+  private inferFieldType(nodeType: string, fieldName: string): string {
+    // Most name/key fields are identifiers in tree-sitter grammars
+    if (fieldName === "name" || fieldName === "key" || fieldName === "id") {
+      return "identifier";
+    }
+    // value and initializer can be anything
+    if (fieldName === "value" || fieldName === "initializer") {
+      return "_";
+    }
+    // Default to identifier as it's the most common for named fields
+    return "identifier";
   }
 }

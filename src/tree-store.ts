@@ -96,7 +96,7 @@ export interface TreeSnapshot {
   mutationCount: number;
   tombstones: Set<string>;
   changedNodeIds: Set<string>;
-  cachedTree?: Tree; // Tree-sitter Tree object to avoid re-parsing
+  cachedTree?: Tree | undefined; // Tree-sitter Tree object to avoid re-parsing
 }
 
 export interface MutationOperationResult {
@@ -691,7 +691,7 @@ export class TreeStore {
     const commitTreeVersion = semanticChangeFlag
       ? snapshot.treeVersion + 1
       : snapshot.treeVersion;
-    const rebuilt = reconcileTree(transactionId, commitTreeVersion, snapshot, rawTree);
+    const rebuilt = reconcileTree(transactionId, commitTreeVersion, snapshot, rawTree, tree);
     rebuilt.dirty = false;
     rebuilt.mutationCount = 0;
     rebuilt.tombstones.clear();
@@ -1184,7 +1184,7 @@ function descriptorLeafHash(descriptor: {
   return hash(stableSerialize(payload));
 }
 
-function serializeSnapshot(snapshot: TreeSnapshot): string {
+export function serializeSnapshot(snapshot: TreeSnapshot): string {
   const text = serializeNode(snapshot, snapshot.rootNodeId, new Set<string>());
   if (text.length === 0) {
     return "";
@@ -1560,5 +1560,6 @@ function bumpTreeVersion(snapshot: TreeSnapshot): number {
   snapshot.treeVersion += 1;
   snapshot.dirty = true;
   snapshot.mutationCount += 1;
+  snapshot.cachedTree = undefined; // Invalidate cache after mutation
   return snapshot.treeVersion;
 }

@@ -20,9 +20,16 @@ const SENSITIVE_KEY_PATTERNS = [
 const MAX_CONTEXT_DEPTH = 6;
 
 export class Logger {
-  private readonly minPriority: number;
+  private minPriority: number;
+  private level: LogLevel;
 
-  public constructor(private readonly level: LogLevel) {
+  public constructor(level: LogLevel) {
+    this.level = level;
+    this.minPriority = LOG_PRIORITIES[level];
+  }
+
+  public setLevel(level: LogLevel): void {
+    this.level = level;
     this.minPriority = LOG_PRIORITIES[level];
   }
 

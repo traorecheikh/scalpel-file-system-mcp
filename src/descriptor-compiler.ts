@@ -236,40 +236,36 @@ function parseCSVArgs(input: string): string[] {
   let current = "";
   let inQuotes = false;
   let quoteChar = "";
+  let i = 0;
   
-  for (let i = 0; i < input.length; i++) {
+  while (i < input.length) {
     const char = input[i];
     
-    if ((char === '"' || char === "'")) {
-      // Count consecutive backslashes before this quote
-      let backslashCount = 0;
-      let j = i - 1;
-      while (j >= 0 && input[j] === "\\") {
-        backslashCount++;
-        j--;
-      }
-      
-      // If there's an even number of backslashes (including 0), the quote is not escaped
-      const isEscaped = backslashCount % 2 === 1;
-      
-      if (!isEscaped) {
-        if (!inQuotes) {
-          inQuotes = true;
-          quoteChar = char;
-        } else if (char === quoteChar) {
-          inQuotes = false;
-          quoteChar = "";
-        } else {
-          current += char;
-        }
+    if ((char === '"' || char === "'") && !inQuotes) {
+      // Opening quote
+      inQuotes = true;
+      quoteChar = char;
+      i++;
+    } else if (char === quoteChar && inQuotes) {
+      // Check if this quote is escaped
+      const prevChar = i > 0 ? input[i - 1] : "";
+      if (prevChar === "\\") {
+        // Escaped quote: remove the backslash we just added, add the quote
+        current = current.slice(0, -1) + char;
+        i++;
       } else {
-        current += char;
+        // Closing quote
+        inQuotes = false;
+        quoteChar = "";
+        i++;
       }
     } else if (char === "," && !inQuotes) {
       args.push(current.trim());
       current = "";
+      i++;
     } else {
       current += char;
+      i++;
     }
   }
   
@@ -291,7 +287,7 @@ function parseShorthand(input: string): NormalizedDescriptor {
   }
 
   const kindAlias = match[2];
-  const argsStr = match[3];
+  const argsStr = match[3] ?? "";
 
   // Parse CSV-like arguments, handling commas within quoted strings
   const args = parseCSVArgs(argsStr);
@@ -303,7 +299,7 @@ function parseShorthand(input: string): NormalizedDescriptor {
 
     const fields: Record<string, any> = { name };
     if (type) fields.datatype = type;
-    if (val) fields.value = parseLiteralValue(val);
+    if (val !== undefined) fields.value = parseLiteralValue(val);
 
     return { kind: "parameter", value: undefined, fields };
   }
@@ -322,7 +318,7 @@ function parseShorthand(input: string): NormalizedDescriptor {
     const val = args[2];
     const fields: Record<string, any> = { name };
     if (type) fields.datatype = type;
-    if (val) fields.value = parseLiteralValue(val);
+    if (val !== undefined) fields.value = parseLiteralValue(val);
     return { kind: "field", value: undefined, fields };
   }
 
@@ -333,7 +329,8 @@ function parseLiteralValue(val: string): any {
   if (val === "true") return true;
   if (val === "false") return false;
   if (val === "null") return null;
-  if (!isNaN(Number(val)) && val.trim() !== "") return Number(val);
+  const trimmed = val.trim();
+  if (!isNaN(Number(trimmed)) && trimmed !== "") return Number(trimmed);
   // quoted string
   if (
     (val.startsWith('"') && val.endsWith('"')) ||

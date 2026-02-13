@@ -14,7 +14,7 @@ Current State:
 Future State (V2):
 > LLM: "Add `maxRetries` to `fetchData`."
 > LLM: `scalpel_search_structure("function[name='fetchData']")` -> ID: `fn_123` (50 tokens)
-> LLM: `scalpel_edit_intent("add_parameter", { parent: "fn_123", name: "maxRetries", type: "number", default: "3" })` (50 tokens)
+> LLM: `scalpel_edit_intent("add_parameter", { parent: "fn_123", name: "maxRetries", type: "number", default_value: "3" })` (50 tokens)
 > Server: Done.
 
 ---

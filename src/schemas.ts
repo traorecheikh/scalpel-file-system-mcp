@@ -2,11 +2,18 @@ import { z } from "zod";
 import type { ToolName } from "./tool-names.js";
 
 export const SupportedLanguageSchema = z.enum([
-  "typescript",
-  "javascript",
+  "css",
   "dart",
+  "go",
+  "html",
   "java",
+  "javascript",
+  "json",
+  "markdown",
+  "python",
   "rust",
+  "typescript",
+  "yaml",
 ]);
 
 const FilePathSchema = z.string().min(1).max(4096);
@@ -32,10 +39,31 @@ const NodeDescriptorSchema = z.union([
   z.string().min(1).max(1024),
 ]);
 
+export const DiffOutputSchema = z
+  .object({
+    before: z.string().describe("Original text"),
+    after: z.string().describe("New text"),
+    unified_diff: z.string().describe("Unified diff format (- old, + new)"),
+    changed_lines: z.object({
+      start: z.number(),
+      end: z.number(),
+    }),
+  })
+  .strict();
+
 export const ScalpelBeginTransactionArgsSchema = z
   .object({
     file: FilePathSchema,
     language: SupportedLanguageSchema.optional(),
+  })
+  .strict();
+
+export const ScalpelCreateFileArgsSchema = z
+  .object({
+    file: FilePathSchema,
+    language: SupportedLanguageSchema.optional(),
+    initial_content: z.string().max(10_000_000).default(""),
+    overwrite: z.boolean().default(false),
   })
   .strict();
 
@@ -45,6 +73,9 @@ export const ScalpelListNodesArgsSchema = z
     transaction_id: TransactionIdSchema,
     depth: z.number().int().min(0).max(32).default(2),
     filter_by_type: z.array(z.string().min(1).max(128)).max(64).optional(),
+    limit: z.number().int().min(1).max(1000).default(100),
+    cursor: z.string().optional().describe("Opaque pagination cursor"),
+    filter_by_parent: NodeIdSchema.optional(),
   })
   .strict();
 
@@ -142,6 +173,7 @@ export const ScalpelHealthCheckArgsSchema = z.object({}).strict();
 
 export const TOOL_SCHEMAS: Record<ToolName, z.ZodTypeAny> = {
   scalpel_begin_transaction: ScalpelBeginTransactionArgsSchema,
+  scalpel_create_file: ScalpelCreateFileArgsSchema,
   scalpel_list_nodes: ScalpelListNodesArgsSchema,
   scalpel_get_node: ScalpelGetNodeArgsSchema,
   scalpel_search_structure: ScalpelSearchStructureArgsSchema,
@@ -159,6 +191,9 @@ export const TOOL_SCHEMAS: Record<ToolName, z.ZodTypeAny> = {
 export type SupportedLanguage = z.infer<typeof SupportedLanguageSchema>;
 export type ScalpelBeginTransactionArgs = z.infer<
   typeof ScalpelBeginTransactionArgsSchema
+>;
+export type ScalpelCreateFileArgs = z.infer<
+  typeof ScalpelCreateFileArgsSchema
 >;
 export type ScalpelListNodesArgs = z.infer<typeof ScalpelListNodesArgsSchema>;
 export type ScalpelGetNodeArgs = z.infer<typeof ScalpelGetNodeArgsSchema>;

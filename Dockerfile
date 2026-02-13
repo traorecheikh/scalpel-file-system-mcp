@@ -4,9 +4,17 @@ ARG NODE_VERSION=22.13.1
 
 FROM node:${NODE_VERSION}-bookworm-slim AS deps
 WORKDIR /app
+
+# Install build dependencies for native modules
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,id=scalpel-npm-deps,target=/root/.npm,sharing=locked \
-  npm ci --ignore-scripts
+  npm ci --ignore-scripts --legacy-peer-deps
 
 FROM deps AS build
 COPY tsconfig.json ./
@@ -15,9 +23,18 @@ RUN npm run build
 
 FROM node:${NODE_VERSION}-bookworm-slim AS prod-deps
 WORKDIR /app
+
+# Install build dependencies for native modules
+RUN apt-get update && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,id=scalpel-npm-prod,target=/root/.npm,sharing=locked \
-  npm ci --omit=dev --ignore-scripts \
+  npm ci --omit=dev --legacy-peer-deps \
+  && npm rebuild \
   && npm cache clean --force
 
 FROM gcr.io/distroless/nodejs22-debian12:nonroot AS runtime
