@@ -240,13 +240,28 @@ function parseCSVArgs(input: string): string[] {
   for (let i = 0; i < input.length; i++) {
     const char = input[i];
     
-    if ((char === '"' || char === "'") && (i === 0 || input[i - 1] !== "\\")) {
-      if (!inQuotes) {
-        inQuotes = true;
-        quoteChar = char;
-      } else if (char === quoteChar) {
-        inQuotes = false;
-        quoteChar = "";
+    if ((char === '"' || char === "'")) {
+      // Count consecutive backslashes before this quote
+      let backslashCount = 0;
+      let j = i - 1;
+      while (j >= 0 && input[j] === "\\") {
+        backslashCount++;
+        j--;
+      }
+      
+      // If there's an even number of backslashes (including 0), the quote is not escaped
+      const isEscaped = backslashCount % 2 === 1;
+      
+      if (!isEscaped) {
+        if (!inQuotes) {
+          inQuotes = true;
+          quoteChar = char;
+        } else if (char === quoteChar) {
+          inQuotes = false;
+          quoteChar = "";
+        } else {
+          current += char;
+        }
       } else {
         current += char;
       }

@@ -98,8 +98,18 @@ export class QueryEngine {
     const value = parts[3];
 
     if (field && value) {
-        // Escape backslashes and quotes in the value to prevent malformed queries
-        const escapedValue = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+        // Escape quotes and backslashes in the value to prevent malformed queries
+        // We need to escape each character that needs escaping only once
+        let escapedValue = "";
+        for (const char of value) {
+          if (char === "\\") {
+            escapedValue += "\\\\";
+          } else if (char === '"') {
+            escapedValue += '\\"';
+          } else {
+            escapedValue += char;
+          }
+        }
         return `(${type} ${field}: (_) @val (#eq? @val "${escapedValue}")) @match`;
     } else {
         return `(${type}) @match`;
